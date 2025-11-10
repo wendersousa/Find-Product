@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 Bot de Scraping Avançado - MERCADO LIVRE DEALS
-Versão: 4.1-ML (Layout "Poly-Card" de 2025)
+Versão: 4.6-ML (Corrige "Lazy Loading" de imagens)
 Descrição: Coleta dados de produtos da página de ofertas do Mercado Livre Brasil.
 """
 
@@ -66,9 +66,6 @@ class Selectors:
     
     # Imagem
     IMAGE_CARD = (By.CSS_SELECTOR, "img.poly-component__picture")
-    
-    # Avaliação (Média de estrelas)
-    RATING = (By.CSS_SELECTOR, "span.poly-reviews__rating")
     
     # --- Seletores de Preço (Página de Listagem) ---
     
@@ -273,14 +270,8 @@ def collect_mercadolivre_data(driver, wait: WebDriverWait, wait_short: WebDriver
           Lista de dicionários com os dados completos dos produtos
     """
     products = []
-    
-    # Extrai categoria da URL (lógica simples)
-    category = url.split('/')[-1].split('?')[0]
-    if not category or category == "ofertas":
-        category = "Ofertas do Dia"
 
     print("\n" + "━"*80)
-    print(f"📂 CATEGORIA: {category}")
     print(f"🔗 URL: {url}")
     print("━"*80)
     
@@ -319,8 +310,14 @@ def collect_mercadolivre_data(driver, wait: WebDriverWait, wait_short: WebDriver
             # --- Coleta de Dados Básicos ---
             title = get_text_or_default(block, Selectors.TITLE)
             link = get_attr_or_default(block, Selectors.LINK, "href")
-            rating = get_text_or_default(block, Selectors.RATING, default="Sem avaliação")
-            image_url = get_attr_or_default(block, Selectors.IMAGE_CARD, "src")
+            
+            # --- LÓGICA DE IMAGEM ATUALIZADA (Lazy Load) ---
+            image_url = get_attr_or_default(block, Selectors.IMAGE_CARD, "data-src")
+            if image_url == "Not Found" or not image_url:
+                # Fallback: Tenta pegar o 'src' se 'data-src' falhar
+                image_url = get_attr_or_default(block, Selectors.IMAGE_CARD, "src")
+            # --- FIM DA LÓGICA DE IMAGEM ---
+
             installments = get_text_or_default(block, Selectors.INSTALLMENTS, default="Não informado")
             
             # --- Lógica de Preço (Mercado Livre) ---
@@ -336,31 +333,24 @@ def collect_mercadolivre_data(driver, wait: WebDriverWait, wait_short: WebDriver
                 else:
                     new_price = new_price_whole
             
-            # --- Limpeza do Link (ML já vem limpo) ---
-            # O link já é o link final, não precisa de limpeza
-            
-            # --- Monta o dicionário ---
+            # --- Monta o dicionário (Nomes internos) ---
             product = {
                 "ID": idx,
-                "Category": category,
                 "Title": title,
                 "Original_Value": old_price,
                 "Discount_Value": new_price,
                 "Installments": installments,
-                "Rating": rating,
                 "Link": link,
-                "Affiliate_Link": link, # Você precisará de outra lógica para afiliado
                 "Image_Card": image_url,
-                "Description": "Não disponível (na página de listagem)",
             }
             products.append(product)
         
         print(f"     ✅ Dados coletados: {len(products)} produtos")
             
     except Exception as e:
-        print(f"\n   ❌ ERRO ao processar categoria {category}")
+        print(f"\n   ❌ ERRO ao processar categoria")
         print(f"     🔴 Detalhes: {str(e)}")
-        screenshot = save_error_screenshot(driver, f"error_category_{category}")
+        screenshot = save_error_screenshot(driver, f"error_category_generic")
         print(f"     📸 Screenshot: {screenshot}")
 
     return products
@@ -376,7 +366,7 @@ def main():
     Orquestra todo o processo de coleta de dados.
     """
     print("\n" + "="*80)
-    print("🚀 BOT DE SCRAPING - MERCADO LIVRE v4.1-ML")
+    print("🚀 BOT DE SCRAPING - MERCADO LIVRE v4.6-ML")
     print("="*80)
     print("\n📋 CONFIGURAÇÃO:")
     print(f"   • Categorias para processar: {len(CATEGORY_URLS)}")
@@ -439,17 +429,27 @@ def main():
         try:
             df = pd.DataFrame(all_products)
             
-            # Reorganiza colunas
+            # Reorganiza colunas (nomes internos)
             column_order = [
-                "ID", "Category", "Title", 
+                "ID", "Title", 
                 "Original_Value", "Discount_Value", "Installments",
-                "Rating", "Link", "Affiliate_Link", 
-                "Image_Card", "Description"
+                "Link", "Image_Card"
             ]
             
             # Filtra colunas para garantir que só as existentes sejam usadas
             final_columns = [col for col in column_order if col in df.columns]
             df = df[final_columns]
+            
+            # Renomeia as colunas para o Excel
+            rename_map = {
+                "Title": "Nome",
+                "Original_Value": "Valor Produto",
+                "Discount_Value": "Valor Promoção",
+                "Installments": "Descrição",
+                "Link": "Link Afiliado",
+                "Image_Card": "Imagem"
+            }
+            df.rename(columns=rename_map, inplace=True)
             
             # Nome do arquivo com timestamp
             file_name = f"mercadolivre_products_{time.strftime('%Y%m%d_%H%M%S')}.xlsx"
@@ -457,15 +457,11 @@ def main():
             print(f"\n   → Criando arquivo Excel...")
             df.to_excel(file_name, index=False, engine='openpyxl')
             
-            # Estatísticas
-            with_description = sum(1 for p in all_products if p['Description'] not in ['Não disponível (na página de listagem)'])
-            
             print(f"\n{'🎉'*40}")
             print(f"✅ PROCESSO CONCLUÍDO COM SUCESSO!")
             print(f"{'🎉'*40}")
             print(f"\n📊 ESTATÍSTICAS:")
             print(f"   • Total de produtos: {len(all_products)}")
-            print(f"   • Com descrição (não deve ter): {with_description}")
             print(f"   • Arquivo gerado: {file_name}")
             print(f"\n{'='*80}\n")
             
@@ -481,7 +477,7 @@ def main():
         print("   ✓ A conexão com a internet está ativa?")
         print("   ✓ As URLs de categoria estão corretas e acessíveis?")
         print("   ✓ O site do Mercado Livre está online?")
-        print("   ✓ Os seletores CSS/XPATH ainda são válidos? (Este script é v4.1, o mais novo)")
+        print("   ✓ Os seletores CSS/XPATH ainda são válidos? (Este script é v4.6, o mais novo)")
         print("   ✓ Verifique os screenshots de erro salvos para análise visual (pode ser CAPTCHA)")
         print(f"\n{'='*80}\n")
 
