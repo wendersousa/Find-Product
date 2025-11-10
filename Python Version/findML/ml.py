@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 """
-Advanced Scraping Bot - Mercado Livre
-Version: 4.0 (Optimized)
-Description: Collects product data from Mercado Livre, including affiliate/sharing links.
+Bot de Scraping Avançado - MERCADO LIVRE DEALS
+Versão: 4.1-ML (Layout "Poly-Card" de 2025)
+Descrição: Coleta dados de produtos da página de ofertas do Mercado Livre Brasil.
 """
 
 import pandas as pd
@@ -20,76 +20,75 @@ from urllib.parse import urlparse, parse_qs
 from typing import List, Dict, Tuple, Optional
 
 
-# --- Profile Configuration ---
-# 1. This is the path to the PARENT "User Data" folder
-#    (Use 'r' before the string to handle backslashes in Windows)
-user_data_path = r"C:\Users\spine\AppData\Local\Google\Chrome\User Data"
-
-# 2. This is the specific profile folder you want to use
-profile_name = "Profile 3"
+# --- Configuração de Perfil (Opcional - DESATIVADO) ---
+#user_data_path = r"C:\Users\SEU_USUARIO\AppData\Local\Google\Chrome\User Data"
+#profile_name = "Profile 3"
 # -----------------------------
 
-# 2. Configure Chrome Options to load the profile
+# 2. Configura as Opções do Chrome para carregar o perfil
 chrome_options = Options()
-
-# Add the argument for the user data directory
-# This loads all profiles and settings
-chrome_options.add_argument(f"user-data-dir={user_data_path}")
-
-# Add the argument to select the specific profile within User Data
-chrome_options.add_argument(f"profile-directory={profile_name}")
+#chrome_options.add_argument(f"user-data-dir={user_data_path}")
+#chrome_options.add_argument(f"profile-directory={profile_name}")
 
 # ============================================================================
-# GLOBAL CONFIGURATION
+# CONFIGURAÇÃO GLOBAL
 # ============================================================================
 
 CATEGORY_URLS = [
-    "https://www.mercadolivre.com.br/ofertas?category=MLB1367&container_id=MLB1279748-1"
+    "https://lista.mercadolivre.com.br/ofertas"
+    # Você pode adicionar mais links de busca/categoria do ML aqui
+    # Ex: "https://lista.mercadolivre.com.br/celulares-smartphones"
 ]
-
-# Wait times (in seconds)
+# Tempos de espera (em segundos)
 WAIT_TIME = 30
 SHORT_WAIT_TIME = 15
-SCROLL_REPETITIONS = 30
-SCROLL_PAUSE = 1.5
+SCROLL_REPETICOES = 30
+SCROLL_PAUSA = 1.5
 
-# Limits
-MAX_SHARE_ATTEMPTS = 3
+# Limites
 DESCRIPTION_LIMIT = 500
 
 # ============================================================================
-# CSS/XPATH SELECTORS
+# SELETORES CSS/XPATH (MERCADO LIVRE - ATUALIZADO Nov/2025)
 # ============================================================================
 
 class Selectors:
-    """Centralizes all website selectors"""
+    """Centraliza todos os seletores do site (Mercado Livre - Layout "Poly-Card")"""
     
-    # Product listing
-    PRODUCT_BLOCK = (By.CSS_SELECTOR, "div.andes-card")
+    # Bloco principal do produto (o 'div' que contém tudo)
+    PRODUCT_BLOCK = (By.CSS_SELECTOR, "div.andes-card.poly-card")
+    
+    # Link (o 'a' que tem o href)
     LINK = (By.CSS_SELECTOR, "a.poly-component__title")
+    
+    # Título (está dentro do link)
     TITLE = (By.CSS_SELECTOR, "a.poly-component__title")
-    OLD_PRICE = (By.CSS_SELECTOR, "s.andes-money-amount--previous")
-    NEW_PRICE = (By.CSS_SELECTOR, "span.andes-money-amount__fraction")
-    INSTALLMENTS = (By.CSS_SELECTOR, "span.poly-price__installments")
+    
+    # Imagem
     IMAGE_CARD = (By.CSS_SELECTOR, "img.poly-component__picture")
+    
+    # Avaliação (Média de estrelas)
     RATING = (By.CSS_SELECTOR, "span.poly-reviews__rating")
     
-    # Detail Page
-    DESCRIPTION = (By.CLASS_NAME, "ui-pdp-description__content")
+    # --- Seletores de Preço (Página de Listagem) ---
     
-    # Share Buttons (multiple strategies)
-    SHARE_BUTTON_XPATH = (By.XPATH, "//span[contains(text(), 'Compartilhar')]/ancestor::button")
-    SHARE_BUTTON_CSS = (By.CSS_SELECTOR, "button[data-testid='generate_link_button'], button[class*='share'], button[aria-label*='Compartilhar']")
-    COPY_BUTTON = (By.CSS_SELECTOR, "button[data-testid='copy-button__label_link'], button[class*='copy']")
-    LINK_TEXTAREA = (By.CSS_SELECTOR, "textarea[data-testid='text-field__label_link'], textarea, input[type='text']")
-
+    # Preço Antigo (riscado)
+    OLD_PRICE = (By.CSS_SELECTOR, "s.andes-money-amount--previous .andes-money-amount__fraction")
+    
+    # Preço Novo (o principal)
+    NEW_PRICE_WHOLE = (By.CSS_SELECTOR, "div.poly-price__current .andes-money-amount__fraction")
+    NEW_PRICE_CENTS = (By.CSS_SELECTOR, "div.poly-price__current .andes-money-amount__cents")
+    
+    # Parcelamento
+    INSTALLMENTS = (By.CSS_SELECTOR, "span.poly-price__installments")
+    
 
 # ============================================================================
-# AUXILIARY FUNCTIONS
+# FUNÇÕES AUXILIARES
 # ============================================================================
 
 def get_text_or_default(element, by_tuple: Tuple, default: str = "Not Found") -> str:
-    """Extracts text from an element or returns a default value"""
+    """Extrai texto de um elemento ou retorna um valor padrão"""
     try:
         return element.find_element(*by_tuple).text.strip().replace("\n", " ")
     except Exception:
@@ -97,7 +96,7 @@ def get_text_or_default(element, by_tuple: Tuple, default: str = "Not Found") ->
 
 
 def get_attr_or_default(element, by_tuple: Tuple, attr: str = "href", default: str = "Not Found") -> str:
-    """Extracts an attribute from an element or returns a default value"""
+    """Extrai um atributo de um elemento ou retorna um valor padrão"""
     try:
         return element.find_element(*by_tuple).get_attribute(attr)
     except Exception:
@@ -105,42 +104,41 @@ def get_attr_or_default(element, by_tuple: Tuple, attr: str = "href", default: s
 
 
 def save_error_screenshot(driver, base_name: str) -> str:
-    """Saves a screenshot with a timestamp for debugging"""
+    """Salva um screenshot com timestamp para debug"""
     timestamp = int(time.time())
     file_name = f"{base_name}_{timestamp}.png"
     try:
         driver.save_screenshot(file_name)
         return file_name
     except Exception:
-        return "Could not save screenshot"
-
+        return "Não foi possível salvar o screenshot"
 
 # ============================================================================
-# DRIVER CONFIGURATION
+# CONFIGURAÇÃO DO DRIVER
 # ============================================================================
 
 def initialize_driver() -> webdriver.Chrome:
     """
-    Initializes the ChromeDriver with optimized and anti-detection settings.
+    Inicializa o ChromeDriver com configurações otimizadas e anti-detecção.
     
-    ⚠️ IMPORTANT: Close ALL Chrome windows before running!
+    ⚠️ IMPORTANTE: Feche TODAS as janelas do Chrome antes de rodar!
     
-    Returns:
-        webdriver.Chrome: Configured driver instance
-        
-    Raises:
-        Exception: If there is an initialization error
+    Retorna:
+          webdriver.Chrome: Instância do driver configurada
+          
+    Levanta:
+          Exception: Se houver erro na inicialização
     """
     print("\n" + "="*80)
-    print("🔧 INITIALIZING CHROMEDRIVER")
+    print("🔧 INICIALIZANDO CHROMEDRIVER")
     print("="*80)
     
-    global chrome_options # Use the global options defined with the profile config
-    options = chrome_options # Start with the options already configured for the profile
+    global chrome_options # Usa as opções globais definidas com a config de perfil
+    options = chrome_options # Começa com as opções já configuradas para o perfil
 
-    # Anti-detection settings
-    print("  → Applying anti-detection settings...")
-    options.add_argument("--start-maximized")
+    # Configurações anti-detecção
+    print("   → Aplicando configurações anti-detecção...")
+    # options.add_argument("--headless=new") # MANTENHA COMENTADO PARA TESTAR
     options.add_argument("--disable-blink-features=AutomationControlled")
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
@@ -149,543 +147,347 @@ def initialize_driver() -> webdriver.Chrome:
     options.add_argument("--disable-notifications")
     options.add_argument("--disable-popup-blocking")
     
-    # Remove automation detection
+    # Remove detecção de automação
     options.add_experimental_option("excludeSwitches", ["enable-automation"])
     options.add_experimental_option('useAutomationExtension', False)
     
-    # Realistic user agent
+    # User agent realista
     user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
     options.add_argument(f"user-agent={user_agent}")
 
-    # Debugging port (tries multiple ports)
-    print("  → Configuring debugging port...")
+    # Porta de debug (tenta várias portas)
+    print("   → Configurando porta de debug...")
     port_found = False
     for port in [9223, 9224, 9225, 9226, 9227]:
         try:
             options.add_argument(f"--remote-debugging-port={port}")
-            print(f"  ✅ Port {port} configured")
+            print(f"   ✅ Porta {port} configurada")
             port_found = True
             break
         except Exception:
             continue
     
     if not port_found:
-        print("  ⚠️ No debugging port available")
+        print("   ⚠️ Nenhuma porta de debug disponível")
 
-    # Initialization
+    # Inicialização
     try:
-        print("  → Installing/Updating ChromeDriver...")
+        print("   → Instalando/Atualizando ChromeDriver...")
         service = ChromeService(ChromeDriverManager().install())
         
-        print("  → Starting browser...")
+        print("   → Iniciando navegador...")
         driver = webdriver.Chrome(service=service, options=options)
         
-        # Remove automation properties via JavaScript
-        print("  → Applying anti-detection masks via JavaScript...")
+        # Remove propriedades de automação via JavaScript
+        print("   → Aplicando máscaras anti-detecção via JavaScript...")
         driver.execute_cdp_cmd('Network.setUserAgentOverride', {"userAgent": user_agent})
         driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
         
         print("\n" + "✅"*40)
-        print("✅ DRIVER STARTED SUCCESSFULLY!")
+        print("✅ DRIVER INICIADO COM SUCESSO!")
         print("✅"*40 + "\n")
         
         return driver
         
     except Exception as e:
         print("\n" + "❌"*40)
-        print(f"❌ ERROR STARTING DRIVER")
+        print(f"❌ ERRO AO INICIAR DRIVER")
         print("❌"*40)
-        print(f"\n🔴 Error: {str(e)}\n")
-        print("💡 POSSIBLE SOLUTIONS:")
-        print("  1. Close ALL Chrome windows/processes")
-        print("  2. Run the script as Administrator")
-        print("  3. Temporarily disable antivirus")
-        print("  4. Update Google Chrome to the latest version")
-        print("  5. If you are using a Chrome profile, comment out the user-data-dir lines")
-        print("  6. Restart the computer")
-        print("  7. Check for pending Windows updates")
+        print(f"\n🔴 Erro: {str(e)}\n")
+        print("💡 POSSÍVEIS SOLUÇÕES:")
+        print("   1. Feche TODAS as janelas/processos do Chrome")
+        print("   2. Rode o script como Administrador")
+        print("   3. Desative temporariamente o antivírus")
+        print("   4. Atualize o Google Chrome para a última versão")
+        print("   5. Se estiver usando um perfil do Chrome, comente as linhas user-data-dir")
+        print("   6. Reinicie o computador")
+        print("   7. Verifique se há atualizações pendentes do Windows")
         print("\n" + "="*80 + "\n")
         raise
 
 
 # ============================================================================
-# NAVIGATION FUNCTIONS
+# FUNÇÕES DE NAVEGAÇÃO
 # ============================================================================
 
-def scroll_page(driver, repetitions: int = SCROLL_REPETITIONS) -> None:
+def scroll_page(driver, repetitions: int = SCROLL_REPETICOES) -> None:
     """
-    Performs a smooth scroll on the page to dynamically load products.
+    Realiza um scroll suave na página para carregar produtos dinamicamente.
     
     Args:
-        driver: WebDriver instance
-        repetitions: Maximum number of scrolls
+          driver: Instância do WebDriver
+          repetitions: Número máximo de scrolls
     """
-    print(f"\n  📜 Starting page scroll (max: {repetitions} repetitions)...")
+    print(f"\n   📜 Iniciando scroll da página (max: {repetitions} repetições)...")
     last_height = 0
     scrolls_without_change = 0
     
     for i in range(repetitions):
-        # Scroll to the end
+        # Scroll até o fim
         driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-        time.sleep(SCROLL_PAUSE)
+        time.sleep(SCROLL_PAUSA)
         
-        # Check new height
+        # Checa nova altura
         new_height = driver.execute_script("return document.body.scrollHeight")
         
-        if i % 5 == 0:  # Log every 5 scrolls
-            print(f"    → Scroll {i+1}/{repetitions} | Height: {new_height}px")
+        if i % 5 == 0:  # Log a cada 5 scrolls
+            print(f"     → Scroll {i+1}/{repetitions} | Altura: {new_height}px")
         
-        # Check if the end has been reached
+        # Checa se chegou ao fim
         if new_height == last_height:
             scrolls_without_change += 1
             if scrolls_without_change >= 3:
-                print(f"  ✅ End of page reached (scroll {i+1})")
+                print(f"   ✅ Fim da página alcançado (scroll {i+1})")
                 break
         else:
             scrolls_without_change = 0
             
         last_height = new_height
     
-    # Scroll back to the top
+    # Scroll de volta ao topo
     driver.execute_script("window.scrollTo(0, 0);")
     time.sleep(1)
-
+    
+    # Tenta fechar pop-up de CEP (comum no ML)
+    try:
+        driver.find_element(By.CSS_SELECTOR, "button.andes-modal__close-button").click()
+        print("   ℹ️ Pop-up de CEP fechado.")
+    except Exception:
+        pass # Ignora se não encontrar
 
 # ============================================================================
-# DATA COLLECTION FUNCTIONS
+# FUNÇÕES DE COLETA DE DADOS (MERCADO LIVRE)
 # ============================================================================
 
-def collect_basic_data(driver, wait: WebDriverWait, wait_short: WebDriverWait, url: str) -> List[Dict]:
+def collect_mercadolivre_data(driver, wait: WebDriverWait, wait_short: WebDriverWait, url: str) -> List[Dict]:
     """
-    Collects basic product data from the listing page.
+    Coleta TODOS os dados dos produtos da página de listagem do Mercado Livre.
     
     Args:
-        driver: WebDriver instance
-        wait: Long WebDriverWait
-        wait_short: Short WebDriverWait
-        url: Category URL
-        
-    Returns:
-        List of dictionaries with product data
+          driver: Instância do WebDriver
+          wait: WebDriverWait longo
+          wait_short: WebDriverWait curto
+          url: URL da Categoria
+          
+    Retorna:
+          Lista de dicionários com os dados completos dos produtos
     """
     products = []
     
-    # Extract category from the URL
-    parsed_url = urlparse(url)
-    query_params = parse_qs(parsed_url.query)
-    category = query_params.get('category', query_params.get('container_id', ['unknown_category']))[0]
+    # Extrai categoria da URL (lógica simples)
+    category = url.split('/')[-1].split('?')[0]
+    if not category or category == "ofertas":
+        category = "Ofertas do Dia"
 
     print("\n" + "━"*80)
-    print(f"📂 CATEGORY: {category}")
+    print(f"📂 CATEGORIA: {category}")
     print(f"🔗 URL: {url}")
     print("━"*80)
     
-    # Access the page
-    print("\n  → Loading page...")
+    # Acessa a página
+    print("\n   → Carregando página...")
     driver.get(url)
 
     try:
-        # Wait for products to load
-        print("  → Waiting for products to load...")
+        # Espera os produtos carregarem
+        print("     → Esperando produtos carregarem...")
+        # Tenta fechar o pop-up de Cookies ANTES de esperar os produtos
+        try:
+            cookie_button = wait_short.until(EC.element_to_be_clickable((By.CSS_SELECTOR, "button[data-testid='action:understood-button']")))
+            cookie_button.click()
+            print("   ℹ️ Pop-up de Cookies fechado.")
+        except Exception:
+            print("   ℹ️ Pop-up de Cookies não encontrado/ignorado.")
+            
+        # Agora espera o bloco principal de produtos
         wait.until(EC.presence_of_element_located(Selectors.PRODUCT_BLOCK))
         time.sleep(2)
         
-        # Scroll to load more products
+        # Rola a página para carregar mais produtos
         scroll_page(driver)
 
-        # Find all product blocks
+        # Encontra todos os blocos de produto
         blocks = driver.find_elements(*Selectors.PRODUCT_BLOCK)
         total_products = len(blocks)
-        print(f"\n  ✅ {total_products} products found!")
-        print(f"\n  → Extracting basic data...")
+        print(f"\n   ✅ {total_products} produtos encontrados!")
+        print(f"\n   → Extraindo dados...")
 
         for idx, block in enumerate(blocks, 1):
-            if idx % 10 == 0:
-                print(f"    → Processing product {idx}/{total_products}...")
+            if idx % 20 == 0:
+                print(f"           → Processando produto {idx}/{total_products}...")
                 
+            # --- Coleta de Dados Básicos ---
+            title = get_text_or_default(block, Selectors.TITLE)
+            link = get_attr_or_default(block, Selectors.LINK, "href")
+            rating = get_text_or_default(block, Selectors.RATING, default="Sem avaliação")
+            image_url = get_attr_or_default(block, Selectors.IMAGE_CARD, "src")
+            installments = get_text_or_default(block, Selectors.INSTALLMENTS, default="Não informado")
+            
+            # --- Lógica de Preço (Mercado Livre) ---
+            old_price = get_text_or_default(block, Selectors.OLD_PRICE, default="Não informado")
+            
+            new_price_whole = get_text_or_default(block, Selectors.NEW_PRICE_WHOLE)
+            new_price_cents = get_text_or_default(block, Selectors.NEW_PRICE_CENTS, default=None)
+            
+            new_price = "Not Found"
+            if new_price_whole != "Not Found":
+                if new_price_cents:
+                    new_price = f"{new_price_whole},{new_price_cents}"
+                else:
+                    new_price = new_price_whole
+            
+            # --- Limpeza do Link (ML já vem limpo) ---
+            # O link já é o link final, não precisa de limpeza
+            
+            # --- Monta o dicionário ---
             product = {
                 "ID": idx,
                 "Category": category,
-                "Title": get_text_or_default(block, Selectors.TITLE),
-                "Original_Value": get_text_or_default(block, Selectors.OLD_PRICE),
-                "Discount_Value": get_text_or_default(block, Selectors.NEW_PRICE),
-                "Installments": get_text_or_default(block, Selectors.INSTALLMENTS),
-                "Link": get_attr_or_default(block, Selectors.LINK),
-                "Image_Card": get_attr_or_default(block, Selectors.IMAGE_CARD, "src"),
-                "Rating": get_text_or_default(block, Selectors.RATING),
-                "Description": "Pending",
-                "Affiliate_Link": "Pending"
+                "Title": title,
+                "Original_Value": old_price,
+                "Discount_Value": new_price,
+                "Installments": installments,
+                "Rating": rating,
+                "Link": link,
+                "Affiliate_Link": link, # Você precisará de outra lógica para afiliado
+                "Image_Card": image_url,
+                "Description": "Não disponível (na página de listagem)",
             }
             products.append(product)
         
-        print(f"  ✅ Basic data collected: {len(products)} products")
+        print(f"     ✅ Dados coletados: {len(products)} produtos")
             
     except Exception as e:
-        print(f"\n  ❌ ERROR processing category {category}")
-        print(f"  🔴 Details: {str(e)}")
+        print(f"\n   ❌ ERRO ao processar categoria {category}")
+        print(f"     🔴 Detalhes: {str(e)}")
         screenshot = save_error_screenshot(driver, f"error_category_{category}")
-        print(f"  📸 Screenshot: {screenshot}")
-
-    return products
-
-
-def try_find_share_button(driver, wait_short: WebDriverWait):
-    """
-    Attempts to find the share button using multiple strategies.
-    
-    Returns:
-        WebElement or None
-    """
-    strategies = [
-        ("XPath (text)", Selectors.SHARE_BUTTON_XPATH),
-        ("CSS Selector", Selectors.SHARE_BUTTON_CSS),
-        ("JavaScript (text search)", None),
-        ("Button scan", None)
-    ]
-    
-    for strategy_name, selector in strategies:
-        print(f"    🔍 Attempt: {strategy_name}...")
-        
-        try:
-            if selector:
-                # Strategies with a defined selector
-                button = wait_short.until(EC.element_to_be_clickable(selector))
-                print(f"    ✅ Button found via {strategy_name}!")
-                return button
-                
-            elif "JavaScript" in strategy_name:
-                # Search via JavaScript
-                button = driver.execute_script("""
-                    return Array.from(document.querySelectorAll('button')).find(btn => 
-                        btn.textContent.includes('Compartilhar') || 
-                        btn.getAttribute('aria-label')?.includes('Compartilhar') ||
-                        btn.getAttribute('data-testid')?.includes('share')
-                    );
-                """)
-                if button:
-                    print(f"    ✅ Button found via {strategy_name}!")
-                    return button
-                    
-            else:
-                # Scan all buttons
-                buttons = driver.find_elements(By.TAG_NAME, "button")
-                for btn in buttons:
-                    try:
-                        text = btn.text.lower()
-                        if 'compartilhar' in text or 'share' in text:
-                            print(f"    ✅ Button found via {strategy_name}!")
-                            return btn
-                    except Exception:
-                        continue
-                        
-        except Exception:
-            print(f"    ⚠️ {strategy_name} failed")
-            continue
-    
-    return None
-
-
-def get_affiliate_link(driver, wait_short: WebDriverWait, product: Dict) -> str:
-    """
-    Gets the product's affiliate/sharing link by clicking Share.
-    
-    Args:
-        driver: WebDriver instance
-        wait_short: Short WebDriverWait
-        product: Dictionary with product data
-        
-    Returns:
-        Affiliate link or original link as a fallback
-    """
-    try:
-        # Scroll to a strategic position
-        driver.execute_script("window.scrollTo(0, document.body.scrollHeight / 3);")
-        time.sleep(2)
-        
-        # Try to find the share button
-        share_button = try_find_share_button(driver, wait_short)
-        
-        if not share_button:
-            print("    ❌ 'Share' button not found using any strategy")
-            return product['Link']
-        
-        # Scroll to the button and click
-        driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", share_button)
-        time.sleep(1)
-        
-        # Try to click
-        try:
-            share_button.click()
-            print("    ✅ 'Share' button clicked!")
-        except Exception:
-            driver.execute_script("arguments[0].click();", share_button)
-            print("    ✅ Button clicked via JavaScript!")
-        
-        time.sleep(3)
-
-        # Wait for the modal to appear
-        try:
-            link_textarea = wait_short.until(EC.presence_of_element_located(Selectors.LINK_TEXTAREA))
-            print("    ✅ Share modal opened!")
-            time.sleep(2)
-            
-            # Try to click the copy button
-            try:
-                copy_button = None
-                
-                # Try via CSS
-                try:
-                    copy_button = driver.find_element(*Selectors.COPY_BUTTON)
-                except Exception:
-                    pass
-                
-                # Try via JavaScript
-                if not copy_button:
-                    copy_button = driver.execute_script("""
-                        return Array.from(document.querySelectorAll('button')).find(btn => 
-                            btn.textContent.includes('Copiar') || 
-                            btn.getAttribute('data-testid')?.includes('copy')
-                        );
-                    """)
-                
-                if copy_button:
-                    driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", copy_button)
-                    time.sleep(0.5)
-                    
-                    try:
-                        copy_button.click()
-                    except Exception:
-                        driver.execute_script("arguments[0].click();", copy_button)
-                    
-                    print("    ✅ 'Copy' button clicked!")
-                    time.sleep(2)
-                    
-                    # Check clipboard
-                    clipboard_link = pyperclip.paste()
-                    if clipboard_link and clipboard_link.startswith("http"):
-                        print(f"    🔗 Link captured via clipboard!")
-                        return clipboard_link
-                
-                # Fallback: read from textarea
-                textarea_link = link_textarea.get_attribute("value")
-                if textarea_link and textarea_link.startswith("http"):
-                    print(f"    🔗 Link captured from textarea!")
-                    return textarea_link
-                    
-            except Exception as e:
-                print(f"    ⚠️ Error copying: {str(e)}")
-                
-            # Close modal
-            try:
-                driver.find_element(By.TAG_NAME, 'body').send_keys(Keys.ESCAPE)
-                time.sleep(1)
-            except Exception:
-                pass
-                
-        except Exception as e:
-            print(f"    ⚠️ Modal not found: {str(e)}")
-            
-    except Exception as e:
-        print(f"    ⚠️ General error: {str(e)}")
-    
-    return product['Link']
-
-
-def collect_details(driver, wait: WebDriverWait, wait_short: WebDriverWait, products: List[Dict]) -> List[Dict]:
-    """
-    Collects individual details for each product (description and affiliate link).
-    
-    Args:
-        driver: WebDriver instance
-        wait: Long WebDriverWait
-        wait_short: Short WebDriverWait
-        products: List of products with basic data
-        
-    Returns:
-        List of products with complete data
-    """
-    total = len(products)
-    print("\n" + "="*80)
-    print(f"📋 COLLECTING DETAILS FOR {total} PRODUCTS")
-    print("="*80)
-    
-    
-    for i, product in enumerate(products, 1):
-        print(f"\n{'─'*80}")
-        print(f"📦 PRODUCT {i}/{total}")
-        print(f"📝 {product['Title'][:70]}...")
-        print(f"{'─'*80}")
-
-        try:
-            # Access product page
-            print(f"\n  → Accessing product page...")
-            driver.get(product['Link'])
-            wait.until(EC.presence_of_element_located((By.TAG_NAME, "body")))
-            time.sleep(3)
-
-            # Collect description
-            print(f"  → Collecting description...")
-            try:
-                description_element = driver.find_element(*Selectors.DESCRIPTION)
-                description = description_element.text.strip().replace("\n", " ")
-                product["Description"] = description[:DESCRIPTION_LIMIT]
-                print(f"    ✅ Description collected ({len(description)} characters)")
-            except Exception:
-                print(f"    ⚠️ Description not found")
-                product["Description"] = "Not available"
-
-            # Collect affiliate link
-            print(f"\n  → Getting affiliate link...")
-            product["Affiliate_Link"] = get_affiliate_link(driver, wait_short, product)
-            
-            if product["Affiliate_Link"] != product['Link']:
-                print(f"    ✅ Affiliate link obtained successfully!")
-            else:
-                print(f"    ⚠️ Using original link as fallback")
-
-            print(f"\n  {'✓'*40}")
-            print(f"  ✅ PRODUCT {i}/{total} COMPLETED!")
-            print(f"  {'✓'*40}")
-
-        except Exception as e:
-            print(f"\n  ❌ ERROR processing product {i}")
-            print(f"  🔴 Details: {str(e)}")
-            screenshot = save_error_screenshot(driver, f"error_product_{i}")
-            print(f"  📸 Screenshot: {screenshot}")
-            
-            # Set default values in case of error
-            if product.get("Description") == "Pending":
-                product["Description"] = "Error collecting"
-            if product.get("Affiliate_Link") == "Pending":
-                product["Affiliate_Link"] = product['Link']
+        print(f"     📸 Screenshot: {screenshot}")
 
     return products
 
 
 # ============================================================================
-# MAIN FUNCTION
+# FUNÇÃO PRINCIPAL
 # ============================================================================
 
 def main():
     """
-    Main scraper function.
-    Orchestrates the entire data collection process.
+    Função principal do scraper.
+    Orquestra todo o processo de coleta de dados.
     """
     print("\n" + "="*80)
-    print("🚀 SCRAPING BOT - MERCADO LIVRE v4.0")
+    print("🚀 BOT DE SCRAPING - MERCADO LIVRE v4.1-ML")
     print("="*80)
-    print("\n📋 CONFIGURATION:")
-    print(f"  • Categories to process: {len(CATEGORY_URLS)}")
-    print(f"  • Max wait time: {WAIT_TIME}s")
-    print(f"  • Short wait time: {SHORT_WAIT_TIME}s")
-    print(f"  • Scroll repetitions: {SCROLL_REPETITIONS}")
-    print(f"  • Description limit: {DESCRIPTION_LIMIT} characters")
+    print("\n📋 CONFIGURAÇÃO:")
+    print(f"   • Categorias para processar: {len(CATEGORY_URLS)}")
+    print(f"   • Tempo máx. espera: {WAIT_TIME}s")
+    print(f"   • Tempo curto espera: {SHORT_WAIT_TIME}s")
+    print(f"   • Repetições de scroll: {SCROLL_REPETICOES}")
     print("\n" + "="*80 + "\n")
     
-    input("⚠️ IMPORTANT: Close ALL Chrome windows and press ENTER to continue...")
+    # input("⚠️ IMPORTANTE: Feche TODAS as janelas do Chrome e pressione ENTER para continuar...")
     
     driver = None
     all_products = []
     
     try:
-        # Initialize driver
+        # Inicializa driver
         driver = initialize_driver()
         wait = WebDriverWait(driver, WAIT_TIME)
         wait_short = WebDriverWait(driver, SHORT_WAIT_TIME)
 
-        # Process each category
+        # Processa cada categoria
         for idx, url in enumerate(CATEGORY_URLS, 1):
             print(f"\n{'█'*80}")
-            print(f"█ PROCESSING CATEGORY {idx}/{len(CATEGORY_URLS)}")
+            print(f"█ PROCESSANDO CATEGORIA {idx}/{len(CATEGORY_URLS)}")
             print(f"{'█'*80}")
             
-            # Collect basic data
-            basic_products = collect_basic_data(driver, wait, wait_short, url)
+            # Coleta dados (lógica de 1 passagem)
+            complete_products = collect_mercadolivre_data(driver, wait, wait_short, url)
             
-            if basic_products:
-                # Collect details
-                complete_products = collect_details(driver, wait, wait_short, basic_products)
+            if complete_products:
                 all_products.extend(complete_products)
                 
                 print(f"\n{'✅'*40}")
-                print(f"✅ Category {idx} COMPLETED! {len(complete_products)} products processed.")
+                print(f"✅ Categoria {idx} CONCLUÍDA! {len(complete_products)} produtos processados.")
                 print(f"{'✅'*40}\n")
             else:
-                print(f"\n⚠️ No products found in category {idx}\n")
+                print(f"\n⚠️ Nenhum produto encontrado na categoria {idx}\n")
 
     except KeyboardInterrupt:
-        print("\n\n⚠️ PROCESS INTERRUPTED BY USER (Ctrl+C)")
+        print("\n\n⚠️ PROCESSO INTERROMPIDO PELO USUÁRIO (Ctrl+C)")
         
     except Exception as e:
-        print(f"\n\n❌ FATAL ERROR: {e}")
+        print(f"\n\n❌ ERRO FATAL: {e}")
         if driver:
             screenshot_name = f"fatal_error_{int(time.time())}.png"
             driver.save_screenshot(screenshot_name)
-            print(f"📸 Error screenshot: {screenshot_name}")
+            print(f"📸 Screenshot do erro: {screenshot_name}")
             
     finally:
         if driver:
-            print("\n🛑 Closing browser...")
+            print("\n🛑 Fechando navegador...")
             driver.quit()
-            print("✅ Browser closed.\n")
+            print("✅ Navegador fechado.\n")
 
-    # Save results
+    # Salva resultados
     print("\n" + "="*80)
-    print("💾 SAVING RESULTS")
+    print("💾 SALVANDO RESULTADOS")
     print("="*80)
     
     if all_products:
         try:
             df = pd.DataFrame(all_products)
             
-            # Reorganize columns
+            # Reorganiza colunas
             column_order = [
                 "ID", "Category", "Title", 
                 "Original_Value", "Discount_Value", "Installments",
                 "Rating", "Link", "Affiliate_Link", 
                 "Image_Card", "Description"
             ]
-            df = df[column_order]
             
-            # File name with timestamp
+            # Filtra colunas para garantir que só as existentes sejam usadas
+            final_columns = [col for col in column_order if col in df.columns]
+            df = df[final_columns]
+            
+            # Nome do arquivo com timestamp
             file_name = f"mercadolivre_products_{time.strftime('%Y%m%d_%H%M%S')}.xlsx"
             
-            print(f"\n  → Creating Excel file...")
+            print(f"\n   → Criando arquivo Excel...")
             df.to_excel(file_name, index=False, engine='openpyxl')
             
-            # Statistics
-            with_affiliate_link = sum(1 for p in all_products if p['Affiliate_Link'] != p['Link'])
-            with_description = sum(1 for p in all_products if p['Description'] not in ['Pending', 'Not available', 'Error collecting'])
+            # Estatísticas
+            with_description = sum(1 for p in all_products if p['Description'] not in ['Não disponível (na página de listagem)'])
             
             print(f"\n{'🎉'*40}")
-            print(f"✅ PROCESS COMPLETED SUCCESSFULLY!")
+            print(f"✅ PROCESSO CONCLUÍDO COM SUCESSO!")
             print(f"{'🎉'*40}")
-            print(f"\n📊 STATISTICS:")
-            print(f"  • Total products: {len(all_products)}")
-            print(f"  • With affiliate link: {with_affiliate_link} ({with_affiliate_link/len(all_products)*100:.1f}%)")
-            print(f"  • With description: {with_description} ({with_description/len(all_products)*100:.1f}%)")
-            print(f"  • File generated: {file_name}")
+            print(f"\n📊 ESTATÍSTICAS:")
+            print(f"   • Total de produtos: {len(all_products)}")
+            print(f"   • Com descrição (não deve ter): {with_description}")
+            print(f"   • Arquivo gerado: {file_name}")
             print(f"\n{'='*80}\n")
             
         except Exception as e:
-            print(f"\n❌ ERROR saving Excel file: {e}")
-            print(f"💡 Data was collected but could not be saved.\n")
+            print(f"\n❌ ERRO AO SALVAR ARQUIVO EXCEL: {e}")
+            print(f"💡 Os dados foram coletados, mas não puderam ser salvos.\n")
             
     else:
         print("\n" + "⚠️"*40)
-        print("⚠️ NO PRODUCTS WERE COLLECTED!")
+        print("⚠️ NENHUM PRODUTO FOI COLETADO!")
         print("⚠️"*40)
-        print("\n💡 VERIFICATION CHECKLIST:")
-        print("  ✓ Is the internet connection active?")
-        print("  ✓ Are the category URLs correct and accessible?")
-        print("  ✓ Is the Mercado Livre site online?")
-        print("  ✓ Are the CSS selectors still valid? (site might have changed)")
-        print("  ✓ Check saved screenshots for visual analysis")
+        print("\n💡 LISTA DE VERIFICAÇÃO:")
+        print("   ✓ A conexão com a internet está ativa?")
+        print("   ✓ As URLs de categoria estão corretas e acessíveis?")
+        print("   ✓ O site do Mercado Livre está online?")
+        print("   ✓ Os seletores CSS/XPATH ainda são válidos? (Este script é v4.1, o mais novo)")
+        print("   ✓ Verifique os screenshots de erro salvos para análise visual (pode ser CAPTCHA)")
         print(f"\n{'='*80}\n")
 
 
 # ============================================================================
-# ENTRY POINT
+# PONTO DE ENTRADA
 # ============================================================================
 
 if __name__ == "__main__":
@@ -693,11 +495,11 @@ if __name__ == "__main__":
         main()
     except KeyboardInterrupt:
         print("\n\n" + "⚠️"*40)
-        print("⚠️ PROCESS INTERRUPTED BY USER (Ctrl+C)")
+        print("⚠️ PROCESSO INTERROMPIDO PELO USUÁRIO (Ctrl+C)")
         print("⚠️"*40 + "\n")
     except Exception as e:
         print("\n\n" + "❌"*40)
-        print(f"❌ UNHANDLED FATAL ERROR")
+        print(f"❌ ERRO FATAL NÃO TRATADO")
         print("❌"*40)
-        print(f"\n🔴 Error: {str(e)}")
-        print("\n💡 Contact technical support with this error message.\n")
+        print(f"\n🔴 Erro: {str(e)}")
+        print("\n💡 Contate o suporte técnico com esta mensagem de erro.\n")
